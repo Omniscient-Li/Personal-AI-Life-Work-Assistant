@@ -356,19 +356,19 @@ def demo_integration():
 
 def demo_with_api_key():
     """演示使用API密钥的完整功能"""
-    print("\n🔑 完整功能演示（需要API密钥）")
+    print("\n🔑 完整功能演示（需要 DEEPSEEK_API_KEY）")
     print("=" * 60)
     
     print("要使用完整功能，请：")
-    print("1. 设置OpenAI API密钥")
+    print("1. 在环境变量或 .env 中设置 DEEPSEEK_API_KEY 等配置")
     print("2. 创建EnhancedConversationEngine实例")
     print("3. 享受AI生成的个性化Prompt")
     
     # 模拟代码示例
     example_code = '''
-# 使用API密钥创建增强版对话引擎
-api_key = "your-openai-api-key-here"
-engine = EnhancedConversationEngine(api_key)
+# 使用API密钥创建增强版对话引擎（此处示例直接传入，也可以在 AIPromptGenerator 内部使用环境变量）
+api_key = "your-deepseek-api-key-here"
+engine = EnhancedConversationEngine(api_key=api_key)
 
 # 生成响应
 result = engine.generate_response(

@@ -11,7 +11,8 @@ import os
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, asdict
 from datetime import datetime
-import openai
+
+from silicon_client import silicon_chat_completion
 
 # 配置日志
 logging.basicConfig(level=logging.INFO)
@@ -44,19 +45,14 @@ class AIPromptGenerator:
     """AI Prompt生成器核心类"""
     
     def __init__(self, api_key: Optional[str] = None, model: str = "gpt-3.5-turbo"):
-        # 允许从环境变量读取，未提供则进入 mock 模式
-        self.api_key = api_key or os.getenv("OPENAI_API_KEY") or os.getenv("AZURE_OPENAI_API_KEY")
+        # 允许从环境变量读取；若无 DEEPSEEK_API_KEY，则进入 mock 模式
+        self.api_key = api_key or os.getenv("DEEPSEEK_API_KEY")
+        # 此处的 model 只作为“逻辑名”，真正用的底层模型由 silicon_client 决定
         self.model = model
-        self.openai_client = None
-        try:
-            if self.api_key:
-                self.openai_client = openai.OpenAI(api_key=self.api_key)
-                logger.info("✅ OpenAI 客户端已初始化")
-            else:
-                logger.info("ℹ️ 未检测到 API Key，使用 mock 模式")
-        except Exception as e:
-            logger.warning(f"⚠️ OpenAI 客户端初始化失败，将使用 mock 模式: {e}")
-            self.openai_client = None
+        if self.api_key:
+            logger.info("✅ 检测到 DEEPSEEK_API_KEY，将通过 SiliconFlow 调用模型")
+        else:
+            logger.info("ℹ️ 未检测到 DEEPSEEK_API_KEY，使用 mock 模式（不实际调用大模型）")
         
         # 基础Prompt模板
         self.base_templates = {
@@ -80,23 +76,20 @@ class AIPromptGenerator:
         """根据上下文生成最适合的Prompt（返回数据类）"""
         try:
             # 无客户端则直接返回后备
-            if self.openai_client is None:
+            if not self.api_key:
                 return self._generate_fallback_prompt(context)
             # 构建Prompt生成请求
             generation_prompt = self._build_generation_prompt(context)
             
-            # 调用AI生成Prompt
-            response = self.openai_client.chat.completions.create(
-                model=self.model,
+            # 调用 SiliconFlow / DeepSeek 生成 Prompt
+            generated_text, _raw = silicon_chat_completion(
                 messages=[
                     {"role": "system", "content": "你是一个专业的Prompt工程师，擅长为不同场景生成高质量的Prompt。"},
-                    {"role": "user", "content": generation_prompt}
+                    {"role": "user", "content": generation_prompt},
                 ],
                 temperature=0.7,
-                max_tokens=500
+                max_tokens=500,
             )
-            
-            generated_text = response.choices[0].message.content
             
             # 解析生成的Prompt
             parsed_prompt = self._parse_generated_prompt(generated_text)
@@ -122,7 +115,7 @@ class AIPromptGenerator:
     def generate_prompt_structured(self, context: PromptContext) -> Dict[str, Any]:
         """返回结构化结果: { success, data, error, meta }"""
         meta: Dict[str, Any] = {}
-        mode = "mock" if self.openai_client is None else "ai"
+        mode = "mock" if not self.api_key else "ai"
         meta["mode"] = mode
         meta["model"] = self.model
         try:
@@ -205,17 +198,14 @@ class AIPromptGenerator:
             格式：评分：X.XX
             """
             
-            response = self.openai_client.chat.completions.create(
-                model=self.model,
+            response_text, _raw = silicon_chat_completion(
                 messages=[
                     {"role": "system", "content": "你是一个Prompt质量评估专家。"},
-                    {"role": "user", "content": evaluation_prompt}
+                    {"role": "user", "content": evaluation_prompt},
                 ],
                 temperature=0.3,
-                max_tokens=200
+                max_tokens=200,
             )
-            
-            response_text = response.choices[0].message.content
             
             # 提取评分
             if "评分：" in response_text:
@@ -249,17 +239,16 @@ class AIPromptGenerator:
             请简要说明这个Prompt如何满足用户需求，以及它的优势。
             """
             
-            response = self.openai_client.chat.completions.create(
-                model=self.model,
+            reply, _raw = silicon_chat_completion(
                 messages=[
                     {"role": "system", "content": "你是一个AI系统分析专家。"},
-                    {"role": "user", "content": reasoning_prompt}
+                    {"role": "user", "content": reasoning_prompt},
                 ],
                 temperature=0.5,
-                max_tokens=200
+                max_tokens=200,
             )
-            
-            return response.choices[0].message.content.strip()
+
+            return reply.strip()
             
         except Exception as e:
             logger.error(f"生成推理过程时出错: {e}")
@@ -282,17 +271,16 @@ class AIPromptGenerator:
             ...
             """
             
-            response = self.openai_client.chat.completions.create(
-                model=self.model,
+            response_text, _raw = silicon_chat_completion(
                 messages=[
                     {"role": "system", "content": "你是一个Prompt优化专家。"},
-                    {"role": "user", "content": optimization_prompt}
+                    {"role": "user", "content": optimization_prompt},
                 ],
                 temperature=0.6,
-                max_tokens=300
+                max_tokens=300,
             )
-            
-            response_text = response.choices[0].message.content.strip()
+
+            response_text = response_text.strip()
             
             # 解析建议
             suggestions = []
@@ -355,17 +343,16 @@ class AIPromptGenerator:
             请直接返回优化后的Prompt文本。
             """
             
-            response = self.openai_client.chat.completions.create(
-                model=self.model,
+            optimized_text, _raw = silicon_chat_completion(
                 messages=[
                     {"role": "system", "content": "你是一个Prompt优化专家。"},
-                    {"role": "user", "content": optimization_prompt}
+                    {"role": "user", "content": optimization_prompt},
                 ],
                 temperature=0.6,
-                max_tokens=500
+                max_tokens=500,
             )
-            
-            optimized_text = response.choices[0].message.content.strip()
+
+            optimized_text = optimized_text.strip()
             
             # 评估优化后的Prompt
             confidence_score = self._evaluate_prompt_quality(optimized_text, context)
@@ -385,7 +372,7 @@ class AIPromptGenerator:
 
     def optimize_prompt_structured(self, original_prompt: str, user_feedback: str, context: PromptContext) -> Dict[str, Any]:
         """结构化优化结果"""
-        meta: Dict[str, Any] = {"mode": "mock" if self.openai_client is None else "ai", "model": self.model}
+        meta: Dict[str, Any] = {"mode": "mock" if not self.api_key else "ai", "model": self.model}
         try:
             result = self.optimize_prompt(original_prompt, user_feedback, context)
             return {"success": True, "data": self._to_dict(result), "error": None, "meta": meta}
@@ -469,8 +456,8 @@ def demo_usage():
     print("🚀 AI Prompt生成器演示")
     print("=" * 50)
     
-    # 注意：这里需要真实的API密钥
-    # api_key = "your-openai-api-key-here"
+    # 注意：这里需要真实的 DeepSeek API 密钥
+    # api_key = "your-deepseek-api-key-here"
     # generator = AIPromptGenerator(api_key)
     
     print("由于没有真实的API密钥，这里展示代码结构：")

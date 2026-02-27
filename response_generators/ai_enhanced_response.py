@@ -7,10 +7,11 @@ AI-Enhanced Response Generator
 
 from .base_response import BaseResponseGenerator
 from typing import Dict, List, Optional
-from openai import AzureOpenAI
 import json
 import sys
 import os
+
+from silicon_client import silicon_chat_completion
 
 # 添加项目根目录到路径
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -28,22 +29,18 @@ class AIEnhancedResponseGenerator(BaseResponseGenerator):
     
     def __init__(self):
         super().__init__()
-        self.ai_client = None
+        self.ai_enabled = False
         self.setup_ai_client()
         
     def setup_ai_client(self):
         """设置AI客户端"""
-        try:
-            self.ai_client = AzureOpenAI(
-                api_key="27d207295cf547959521bd46c91c8ee7",
-                api_version="2024-02-15-preview",
-                azure_endpoint="https://rj-llm-us-east-2.openai.azure.com/",
-                azure_deployment="SL-Azure-gpt-4.1"
-            )
-            print("✅ AI增强响应生成器已初始化")
-        except Exception as e:
-            print(f"⚠️ AI客户端设置失败: {e}")
-            self.ai_client = None
+        api_key = os.getenv("DEEPSEEK_API_KEY")
+        if api_key:
+            self.ai_enabled = True
+            print("✅ AI增强响应生成器已初始化 (SiliconFlow / DeepSeek)")
+        else:
+            self.ai_enabled = False
+            print("ℹ️ 未检测到 DEEPSEEK_API_KEY，将使用基础响应生成（后备模式）")
     
     def setup_generator(self):
         """设置生成器"""
@@ -61,25 +58,24 @@ class AIEnhancedResponseGenerator(BaseResponseGenerator):
     
     def _generate_core_response(self, understanding: Dict, context: Dict) -> str:
         """使用AI生成个性化响应"""
-        if not self.ai_client:
+        if not self.ai_enabled:
             return self._generate_fallback_response(understanding, context)
         
         try:
             # 构建个性化提示
             prompt = self._build_personalized_prompt(understanding, context)
             
-            # 调用AI生成响应
-            response = self.ai_client.chat.completions.create(
-                model="gpt-4",
+            # 调用AI生成响应（通过 SiliconFlow / DeepSeek）
+            ai_text, _raw = silicon_chat_completion(
                 messages=[
                     {"role": "system", "content": self._get_system_prompt()},
-                    {"role": "user", "content": prompt}
+                    {"role": "user", "content": prompt},
                 ],
                 max_tokens=300,
-                temperature=0.7
+                temperature=0.7,
             )
-            
-            ai_response = response.choices[0].message.content.strip()
+
+            ai_response = ai_text.strip()
             
             # 记录响应生成
             self.log_response_generation(understanding.get("intent", ""), ai_response, context)

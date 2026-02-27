@@ -8,19 +8,42 @@ import json
 import logging
 from datetime import datetime
 from knowledge_base import knowledge_base
-from vector_store import vector_store
 
 # 配置日志
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# 向量检索依赖（sentence-transformers / transformers / huggingface-hub）可能在部分环境中安装失败。
+# 为了不影响主流程，这里做一个“可选向量 RAG”的降级机制：
+try:
+    from vector_store import vector_store as _vector_store_impl
+    _VECTOR_RAG_ENABLED = True
+except Exception as e:
+    logger.warning(f"向量检索模块加载失败，将禁用向量 RAG（仅保留轻量 RAG 和知识库）：{e}")
+
+    class _DummyVectorStore:
+        """占位向量存储实现，始终返回空结果，避免导入错误导致系统崩溃。"""
+
+        def search_knowledge(self, *args, **kwargs):
+            return []
+
+        @property
+        def collections(self):
+            return {}
+
+    _vector_store_impl = _DummyVectorStore()
+    _VECTOR_RAG_ENABLED = False
 
 class RetrievalSystem:
     """智能检索系统"""
     
     def __init__(self):
         self.knowledge_base = knowledge_base
-        self.vector_store = vector_store
-        logger.info("✅ 智能检索系统初始化完成")
+        self.vector_store = _vector_store_impl
+        if _VECTOR_RAG_ENABLED:
+            logger.info("✅ 智能检索系统初始化完成（向量 RAG 已启用）")
+        else:
+            logger.info("✅ 智能检索系统初始化完成（向量 RAG 已关闭，仅使用轻量 RAG + 知识库）")
     
     def retrieve_knowledge(self, user_input: str, session_id: str, 
                           understanding: Dict, context: Dict = None) -> Dict[str, Any]:

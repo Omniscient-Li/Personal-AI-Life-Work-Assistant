@@ -1,0 +1,8 @@
+{
+  // 让 Pylance 把当前项目根目录当作模块搜索路径，消除本地模块的 reportMissingImports
+  "python.analysis.extraPaths": [
+    "."
+  ]
+}
+
+

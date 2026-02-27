@@ -8,6 +8,7 @@ import json
 from datetime import datetime
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, asdict
+from collections import Counter
 import logging
 
 # 配置日志
@@ -355,7 +356,7 @@ class KnowledgeBase:
             return []
     
     def get_knowledge_summary(self, session_id: str) -> Dict[str, Any]:
-        """获取知识库摘要"""
+        """获取知识库摘要（结构化数据）"""
         try:
             # 获取基础统计
             with sqlite3.connect(self.db_path) as conn:
@@ -418,6 +419,91 @@ class KnowledgeBase:
         except Exception as e:
             logger.error(f"❌ 获取知识库摘要失败: {e}")
             return {}
+
+    def get_user_profile_summary_text(self, session_id: str) -> str:
+        """
+        基于知识库构建一个简短的“用户画像”文本摘要，便于直接放入提示词中。
+
+        内容大致包含：
+        - 对话数量
+        - 常见意图
+        - 常见话题
+        - 顶部偏好意图
+        - 行为模式的粗略描述
+        """
+        try:
+            summary = self.get_knowledge_summary(session_id)
+            if not summary:
+                return (
+                    "No long-term user profile is available yet. "
+                    "You can answer based on general best practices."
+                )
+
+            total_conv = summary.get("total_conversations", 0)
+            intent_dist = summary.get("intent_distribution", {})
+            topic_dist = summary.get("topic_distribution", {})
+            top_prefs = summary.get("top_preferences", [])
+            behavior_patterns = summary.get("behavior_patterns", {})
+
+            lines = []
+            lines.append(f"Total conversations with this user: {total_conv}.")
+
+            if intent_dist:
+                intents_str = ", ".join(
+                    f"{k} (count={v})" for k, v in intent_dist.items()
+                )
+                lines.append(f"Most common intents: {intents_str}.")
+
+            if topic_dist:
+                topics_str = ", ".join(
+                    f"{k} (count={v})" for k, v in topic_dist.items()
+                )
+                lines.append(f"Most common topics: {topics_str}.")
+
+            if top_prefs:
+                prefs_str = ", ".join(top_prefs)
+                lines.append(f"Top user preferences by intent: {prefs_str}.")
+
+            # 行为模式更友好地描述一部分常见信息（例如：常在什么时间段对话）
+            if behavior_patterns:
+                # 时间偏好
+                time_items = behavior_patterns.get("time_preference", [])
+                time_periods: List[str] = []
+                for item in time_items:
+                    try:
+                        data = json.loads(item.get("data", "{}"))
+                        period = data.get("time_period")
+                        if period:
+                            time_periods.append(period)
+                    except Exception:
+                        continue
+
+                if time_periods:
+                    most_common_period, _ = Counter(time_periods).most_common(1)[0]
+                    period_text_map = {
+                        "morning": "morning (user often chats in the morning)",
+                        "afternoon": "afternoon (user often chats in the afternoon)",
+                        "evening": "evening or night (user often chats at night)",
+                    }
+                    lines.append(
+                        f"Typical time preference: {period_text_map.get(most_common_period, most_common_period)}."
+                    )
+
+                # 其它模式仅列出类型名称，避免提示过长
+                pattern_types = ", ".join(behavior_patterns.keys())
+                lines.append(
+                    "Observed behavior patterns (types only, details omitted for brevity): "
+                    f"{pattern_types}."
+                )
+
+            return " ".join(lines) if lines else (
+                "No strong user preferences or patterns have been observed yet."
+            )
+        except Exception as e:
+            logger.error(f"❌ 构建用户画像摘要失败: {e}")
+            return (
+                "User profile summary is temporarily unavailable due to an internal error."
+            )
     
     def cleanup_old_records(self, days: int = 30):
         """清理旧记录"""

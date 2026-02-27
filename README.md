@@ -1,114 +1,148 @@
-# AI Prompt System
+# Personal AI Life & Work Assistant
 
-这是一个“JSON 优先”的 Prompt 生成系统：支持生成、评估、优化 Prompt，并且所有核心库函数返回统一的结构化对象（JSON 可序列化）。命令行支持文本/JSON 两种输出模式（由环境变量 `AIPS_OUTPUT` 控制）。此外，内置“两段式（设计→执行）”与“多意图→多任务”编排能力，可将复杂输入自动拆解为多个子任务，分别为每个子任务设计结构化 JSON Prompt 并执行，再聚合成最终回复。
+这是一个**个人 AI 助手**项目，聚焦三个核心能力：
 
-## 设计原则
-- 核心库函数只返回结构化对象，展示逻辑由 CLI 决定
-- JSON-first：稳定的输出 schema，便于集成与测试
-- 配置依赖环境变量（无硬编码密钥）
-- 无密钥自动降级为 mock 模式（meta.mode=mock）
+- **RAG（检索增强生成）**：结合轻量规则知识库 + 向量库（Chroma + sentence-transformers）+ 用户长期画像。
+- **多 Agent 场景切换**：根据意图在学习 / 工作 / 生活 / 通用等 Agent 间自动切换。
+- **对话模式 + 长期记忆**：支持多轮自然对话，并将对话存入 SQLite 知识库，用于后续更个性化的回答。
 
-## 快速开始
+当前你主要以 **聊天模式（chat mode）** 使用本项目。
+
+## 功能概览
+
+- **两段式 Orchestrator（设计 → 执行）**
+  - 设计：`json_prompt_generator.py` 生成结构化 JSON Prompt，包括角色、任务描述、输出要求、约束等。
+  - 执行：`orchestrator.py` 将 JSON Prompt 编译成自然语言提示，调用大模型（通过 SiliconFlow/DeepSeek），生成最终回答。
+
+- **多意图与多任务**
+  - `intent_parser.py` 对用户输入进行多意图解析，必要时可以拆分为多个子任务（目前聊天主流程使用轻量意图分析）。
+  - 支持多任务设计与执行，并聚合结果（用于日程规划等场景）。
+
+- **RAG 与长期记忆**
+  - `light_rag.py`：基于规则/关键词的轻量知识检索，用于健康/学习等常识场景。
+  - `retrieval_system.py`：整合向量检索（Chroma + sentence-transformers）、偏好、上下文的多策略检索。
+  - `knowledge_base.py`：使用 SQLite 存储：
+    - 每轮对话的 `session_id / user_input / ai_response / intent / topic / timestamp`。
+    - 用户偏好（常见意图、频率、偏好分数）。
+    - 行为模式（如常在早上/下午/晚上聊天、话题切换模式等）。
+  - Orchestrator 在回答前，会把“用户画像摘要 + 轻量知识 + 向量检索结果”合并成 `rag_knowledge` 注入 Prompt。
+
+- **多 Agent 架构**
+  - `agents.py` 定义多个 Agent 画像，例如：
+    - `StudyAgent`：学习规划/方法论教练。
+    - `WorkAgent`：工作任务/效率助手。
+    - `LifeAgent`：生活习惯/情绪支持助手。
+    - `GeneralAgent`：通用聊天与问答。
+  - `select_agent_by_intent(intent)` 根据当前意图选择合适的 Agent，并把 Agent 信息写入 JSON Prompt 的 `agent_profile`，影响模型的 System Prompt。
+
+- **命令行对话模式**
+  - `main.py` 提供 `chat_loop`：
+    - 每轮读取用户输入，调用 `PromptOrchestrator` + RAG + Agent。
+    - 自动检测意图与场景（工作/学习/生活/通用），切换到对应 Agent。
+    - 在终端提示当前 Agent 和场景，并将对话写入长期知识库。
+
+## 安装与环境
+
+假设项目克隆或放置在：`C:\ai-projects\Personal-AI-Life-Work-Assistant`
+
 ```bash
-python -m venv app_env
-source app_env/bin/activate
+python -m venv .venv
+.\.venv\Scripts\activate
 pip install -r requirements.txt
-cp .env.example .env  # 如需使用 Azure/OpenAI，请填写密钥
+```
 
-# 文本模式
+### 关键环境变量
+
+- **模型与 API**
+  - `DEEPSEEK_API_KEY`：SiliconFlow / DeepSeek 的 API Key（必须配置，否则执行阶段会退回 mock 模式）。
+  - `MODEL`：可选，自定义模型名称（默认：`Qwen/Qwen2.5-7B-Instruct`）。
+
+- **运行模式**
+  - `AIPS_MODE`：
+    - `demo`（默认）→ 运行原有 Demo 演示（基础 Prompt + Orchestrator 示例）。
+    - `chat` → 进入命令行聊天模式（推荐你日常使用）。
+  - `AIPS_NO_INTERACTIVE`：
+    - `1/true/yes` → 禁用命令行交互（用于自动化环境）。
+    - 其它/未设置 → 允许交互。
+
+- **其它**
+  - `AIPS_OUTPUT`：`text` | `json`，控制 Demo 输出格式（对 chat 模式影响不大）。
+  - `AIPS_SESSION_ID`：可选，用于区分不同会话的长期记忆（默认：`cli_session`）。
+
+## 如何运行聊天模式
+
+在 PowerShell 中（Windows 示例）：
+
+```powershell
+cd C:\ai-projects\Personal-AI-Life-Work-Assistant
+
+# 激活虚拟环境（如果有）
+.\.venv\Scripts\activate
+
+# 设置环境变量并启动聊天模式
+$env:AIPS_MODE="chat"
+$env:AIPS_NO_INTERACTIVE="0"
 python main.py
-
-# JSON 模式
-AIPS_OUTPUT=json python main.py
 ```
 
-## 环境变量
-- `AZURE_OPENAI_API_KEY`
-- `AZURE_OPENAI_ENDPOINT`
-- `AZURE_OPENAI_DEPLOYMENT`
-- `AZURE_OPENAI_API_VERSION`（默认：2024-02-15-preview）
-- `AIPS_OUTPUT`：`text` | `json`
+进入后，你会看到类似提示：
 
-## 两段式与多任务编排（Orchestrator）
-- 两段式：
-  - 设计（design）：根据上下文产出结构化 JSON Prompt（包含角色、任务描述、所需输出、约束、输出格式等）
-  - 执行（execute）：将 JSON Prompt 编译为可执行提示，并生成最终结构化回复（无密钥时为降级示例）
-- 多意图→多任务：
-  - 解析：`intent_parser.py` 将复杂输入按句切分并识别多意图与轻量实体
-  - 多任务设计：`design_prompts_multi` 为每个子句/意图生成独立 JSON Prompt
-  - 多任务执行：`execute_prompts_multi` 逐个执行，`_aggregate_results` 聚合生成最终摘要
-- 主要接口（见 `orchestrator.py`）：
-  - `design_prompt(ctx)`、`execute_prompt(json_prompt)`
-  - `design_prompts_multi(user_input, base_ctx)`、`execute_prompts_multi(tasks)`
-  - `generate_and_respond(ctx)`、`generate_and_respond_multi(user_input, base_ctx)`
+- `个人 AI 助手（对话模式）`
+- `输入内容开始对话，输入 exit / quit 退出。`
 
-## 运行演示（示例命令）
-```bash
-# 文本模式（默认）
-python main.py
+每轮回答前，会显示当前 Agent 状态，例如：
 
-# JSON 模式（推荐用于集成与调试）
-AIPS_OUTPUT=json python main.py
+```text
+[Agent: WorkAgent | Scene: work | Intent: work_task]
+Assistant:
+...
 ```
 
-JSON 模式输出包含以下关键段：
-- `type: orchestrator_design`：两段式“设计”阶段产物（JSON Prompt）
-- `type: orchestrator_execute`：两段式“执行”阶段产物（最终文本+编译后的提示）
-- `type: orchestrator_multi`：多意图→多任务整链路（含 understanding、tasks、executed、final）
+你可以自由说：工作、学习、生活相关的问题，系统会自动切换到对应 Agent。
 
-## 结构化输出示例
-- 生成 Prompt（GeneratedPrompt）
-```json
-{
-  "success": true,
-  "data": {
-    "prompt_text": "...",
-    "confidence_score": 0.86,
-    "reasoning": "...",
-    "optimization_suggestions": ["..."],
-    "context_used": {"task_type": "...", "user_input": "..."}
-  },
-  "meta": {"mode": "ai|mock", "model": "gpt-4"}
-}
-```
+## 两段式 Orchestrator 与多任务
 
-- 结构化 JSON Prompt（JSONPrompt）
-```json
-{
-  "success": true,
-  "data": {
-    "role": "time_management_specialist",
-    "user_context": {"...": "..."},
-    "task_description": "...",
-    "required_outputs": [ ... ],
-    "constraints": [ ... ],
-    "output_format": { ... }
-  }
-}
-```
+详见 `orchestrator.py`：
 
-- 多任务编排结果（节选）
-```json
-{
-  "type": "orchestrator_multi",
-  "success": true,
-  "data": {
-    "designed": { "understanding": { "segments": [ {"text": "明天下午开会", "intent": "schedule_management"} ] }, "tasks": [ ... ] },
-    "executed": [ { "task_id": "task_1", "result": { "final_text": "..." } } ],
-    "final": { "summary": "...", "count": 3 }
-  }
-}
-```
+- **核心方法**
+  - `design_prompt(ctx)` / `execute_prompt(json_prompt)`
+  - `generate_and_respond(ctx)`：单任务完整链路（设计 → 执行）。
+  - `design_prompts_multi` / `execute_prompts_multi` / `generate_and_respond_multi`：多意图 → 多任务链路。
+  - `generate_and_respond_with_light_rag(ctx, intent)`：带 RAG + Agent 的主流程。
 
-## Mock 模式说明
-- 未配置 `AZURE_OPENAI_*` 时自动进入降级（mock）模式：
-  - 仍产出完整的结构化 JSON（`meta.mode=mock`）
-  - 执行阶段返回占位但结构化良好的示例文本，便于前后端联调与自动化测试
+- **意图与场景分析**
+  - `analyze_intent_and_scene(user_input, previous_scene)`：
+    - 调用 `parse_multi_intent` 分析意图片段。
+    - 提取主意图 `intent` 与主话题 `primary_topic`。
+    - 补全 `understanding["life_context"]["topic_analysis"]`，用于行为模式分析和长期记忆。
 
-## 测试
-```bash
-pytest -q
-```
+## 知识库与用户画像
+
+- `knowledge_base.py`：
+  - `store_conversation(session_id, user_input, ai_response, understanding)`
+    - 保存每轮对话及意图、话题、置信度等。
+    - 在同一事务中更新用户偏好和行为模式（时间偏好/话题切换）。
+  - `get_knowledge_summary(session_id)`
+    - 返回该会话的对话数、意图分布、话题分布、偏好、行为模式等。
+  - `get_user_profile_summary_text(session_id)`
+    - 将上述结构转为一段简短的用户画像描述：
+      - 常见意图与话题。
+      - 常用时间段（早上/下午/晚上聊天）。
+      - 主要行为模式类型列表。
+    - 这段文本会被 Orchestrator 作为 RAG 上下文的一部分注入模型。
+
+## 开发与调试建议
+
+- **代码入口**
+  - 核心入口：`main.py` → `AIPromptSystem.run()`。
+  - 聊天模式主要看：`AIPromptSystem.chat_loop()`。
+
+- **查看长期记忆效果**
+  - 与助手多聊几轮后，可以在代码中调用：
+    - `knowledge_base.get_knowledge_summary(session_id)`
+    - `knowledge_base.get_user_profile_summary_text(session_id)`
+  - 或者在未来加一个 `/profile` 命令，把当前画像打印出来。
 
 ## 许可证
+
 MIT
