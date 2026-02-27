@@ -1,6 +1,4 @@
-# 灵犀助手MVP技术栈依赖
 
-# Web框架
 fastapi==0.104.1
 uvicorn[standard]==0.24.0
 
